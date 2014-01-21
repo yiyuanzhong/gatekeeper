@@ -38,7 +38,6 @@
     pam_sm_close_session;
     pam_sm_chauthtok;
 
-    login_with_credentials;
     login_demo_generate_credentials;
 
   local:
