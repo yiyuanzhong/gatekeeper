@@ -68,6 +68,10 @@ PAM_METHOD(pam_sm_authenticate)
         if (resp) {
             if (ret == PAM_SUCCESS) {
                 pam_password = resp->resp;
+
+                /* Failure? That's OK. */
+                pam_set_item(pamh, PAM_AUTHTOK, pam_password);
+
             } else {
                 free(resp->resp);
             }
