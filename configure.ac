@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-AC_PREREQ([2.69])
+AC_PREREQ([2.59])
 AC_INIT([gatekeeper], [1.0.0], [yiyuanzhong@gmail.com])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_SRCDIR([login.c])
@@ -21,6 +21,13 @@ AC_CONFIG_MACRO_DIR([m4])
 AC_CONFIG_FILES([so.map])
 
 AM_INIT_AUTOMAKE
+
+AC_ARG_WITH([sqlite],
+            [AC_HELP_STRING([--with-sqlite],
+                            [use bundled sqlite (default=yes)])])
+
+AM_CONDITIONAL([SQLITE], [test x"${with_sqlite}" != x"no"])
+AS_IF([test x"${with_sqlite}" = x"no"], [PKG_CHECK_MODULES([sqlite], [sqlite3])])
 
 # Checks for programs.
 AC_PROG_CC
@@ -50,5 +57,5 @@ AC_C_BIGENDIAN
 AC_FUNC_MALLOC
 AC_CHECK_FUNCS([memset strdup strtoul])
 
-AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile sqlite/Makefile])
 AC_OUTPUT

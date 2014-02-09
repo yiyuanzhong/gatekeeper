@@ -19,9 +19,8 @@ ACLOCAL_AMFLAGS = -I m4
 noinst_PROGRAMS = test_@PACKAGE_NAME@
 lib_LTLIBRARIES = lib@PACKAGE_NAME@.la
 
-lib@PACKAGE_NAME@_la_LIBADD = ${openssl_LIBS}
-lib@PACKAGE_NAME@_la_LDFLAGS = -shared
-lib@PACKAGE_NAME@_la_LDFLAGS += -version-info 2:0:0
+lib@PACKAGE_NAME@_la_LIBADD = ${openssl_LIBS} ${sqlite_LIBS}
+lib@PACKAGE_NAME@_la_LDFLAGS = -version-info 2:0:0
 lib@PACKAGE_NAME@_la_LDFLAGS += -Wl,--version-script -Wl,$(builddir)/so.map
 
 lib@PACKAGE_NAME@_la_SOURCES = config.h pam-common.h \
@@ -37,8 +36,14 @@ lib@PACKAGE_NAME@_la_SOURCES = config.h pam-common.h \
 test_@PACKAGE_NAME@_SOURCES = main.c
 test_@PACKAGE_NAME@_LDADD = lib@PACKAGE_NAME@.la
 
-AM_CPPFLAGS = -DCONFIG_PACKAGE_NAME=@PACKAGE_NAME@
-AM_CFLAGS = -g -Wall -Werror ${openssl_CFLAGS}
+AM_CPPFLAGS = -DCONFIG_PACKAGE_NAME=@PACKAGE_NAME@ -DNDEBUG
+AM_CFLAGS = -g -Wall -Werror ${openssl_CFLAGS} ${sqlite_CFLAGS}
 
 EXTRA_DISTCLEAN = so.map
-EXTRA_DIST = so.map.in
+EXTRA_DIST = so.map.in sqlite/empty.sql sqlite/demo.sql
+
+if SQLITE
+SUBDIRS = sqlite
+AM_CPPFLAGS += -I${srcdir}/sqlite
+lib@PACKAGE_NAME@_la_LIBADD += sqlite/libsqlite3.la
+endif

@@ -24,10 +24,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <unistd.h>
 
+#include <sqlite3.h>
+
 #define GATEKEEPER_UID_INITIAL 81000
-#define GATEKEEPER_UID_COUNT   10
+#define GATEKEEPER_UID_COUNT    9000
 #define GATEKEEPER_GID         81000
 
 #define GATEKEEPER_UID_MINIMUM (GATEKEEPER_UID_INITIAL + 1)
@@ -38,7 +41,8 @@
 #define GATEKEEPER_USERNAME_PRELEN 4
 #define GATEKEEPER_USERNAME_LENGTH 9
 
-#define GATEKEEPER_JAIL_PATH        "/bin/sh"
+#define GATEKEEPER_USER_DB_PATH     "/var/run/gatekeeper_user.db"
+#define GATEKEEPER_HOST_DB_PATH     "/var/run/gatekeeper_host.db"
 
 struct unode_t {
     struct unode_t *next;
@@ -112,7 +116,7 @@ static int user_is_super_user(void)
     return 1;
 }
 
-static int user_do_close_database(void)
+static int user_do_close_user_database(void)
 {
     struct unode_t *p;
     struct unode_t *q;
@@ -127,13 +131,14 @@ static int user_do_close_database(void)
     return 0;
 }
 
-static int user_do_close_host(void)
+static int user_do_close_host_database(void)
 {
-    struct unode_t *p;
-    struct unode_t *q;
+    struct hnode_t *p;
+    struct hnode_t *q;
 
-    for (p = g_db_user_ptr; p; p = q) {
+    for (p = g_db_host_ptr; p; p = q) {
         q = p->next;
+        free(p->pubkey);
         free(p);
     }
 
@@ -141,87 +146,127 @@ static int user_do_close_host(void)
     return 0;
 }
 
-__attribute__ ((destructor)) static void user_do_close_database_on_unload(void)
+__attribute__ ((destructor)) static void user_do_close_databases_on_unload(void)
 {
     pthread_mutex_lock(&g_mutex_user);
-    user_do_close_database();
+    user_do_close_user_database();
     pthread_mutex_unlock(&g_mutex_user);
 
     pthread_mutex_lock(&g_mutex_host);
-    user_do_close_host();
+    user_do_close_host_database();
     pthread_mutex_unlock(&g_mutex_host);
-
-    pthread_mutex_destroy(&g_mutex_user);
-    pthread_mutex_destroy(&g_mutex_host);
 }
 
-static int user_do_open_database(void)
+static int user_do_open_user_database_one(sqlite3_stmt *stmt)
 {
     char buf[NAME_MAX];
-    struct unode_t *m;
     struct unode_t *n;
     struct user_t *u;
+    int64_t ret;
     uid_t uid;
 
-    assert(!g_db_user_ptr);
-
-    /* TODO(yiyuanzhong): the real one.
-     * Get all local user accounts from a daemon or a locked file.
-     */
-
-    m = NULL;
-    for (uid = GATEKEEPER_UID_MINIMUM; uid <= GATEKEEPER_UID_MAXIMUM; ++uid) {
-        if (user_get_username_by_uid(uid, buf, sizeof(buf))) {
-            user_do_close_database();
-            return -1;
-        }
-
-        n = (struct unode_t *)malloc(sizeof(*n));
-        u = (struct user_t *)malloc(sizeof(*u));
-        if (!n || !u) {
-            user_do_close_database();
-            user_free(u);
-            free(n);
-            return -1;
-        }
-
-        memset(u, 0, sizeof(*u));
-        n->next = NULL;
-        n->user = u;
-
-        n->h            = 0xb922a62746eac276;
-        n->l            = uid - GATEKEEPER_UID_MINIMUM;
-
-        u->uid          = uid;
-        u->gid          = GATEKEEPER_GID;
-        u->home         = strdup("/home");
-        u->shell        = strdup(GATEKEEPER_JAIL_PATH);
-        u->service      = strdup("GATEKEEPER");
-        u->username     = strdup(buf);
-
-        if (!u->home || !u->shell || !u->service || !u->username) {
-            user_do_close_database();
-            user_free(u);
-            free(n);
-            return -1;
-        }
-
-        if (m) {
-            m->next = n;
-            m = m->next;
-        } else {
-            g_db_user_ptr = n;
-            m = g_db_user_ptr;
-        }
+    assert(stmt);
+    if (sqlite3_column_count(stmt) != 6) { /* WTF? */
+        return -1;
     }
 
+    uid = (uid_t)sqlite3_column_int64(stmt, 0);
+    if (!user_is_valid_uid(uid)) {
+        /* Ignore and keep going. */
+        return 0;
+    }
+
+    if (user_get_username_by_uid(uid, buf, sizeof(buf))) {
+        return -1;
+    }
+
+    n = (struct unode_t *)malloc(sizeof(*n));
+    u = (struct user_t *)malloc(sizeof(*u));
+    if (!n || !u) {
+        user_free(u);
+        free(n);
+        return -1;
+    }
+
+    memset(u, 0, sizeof(*u));
+    n->next = NULL;
+    n->user = u;
+
+    ret = sqlite3_column_int64(stmt, 1);
+    n->h = *(uint64_t *)&ret;
+    ret = sqlite3_column_int64(stmt, 2);
+    n->l = *(uint64_t *)&ret;
+
+    u->uid          = uid;
+    u->gid          = GATEKEEPER_GID;
+    u->home         = strdup((const char *)sqlite3_column_text(stmt, 3));
+    u->shell        = strdup((const char *)sqlite3_column_text(stmt, 4));
+    u->service      = strdup((const char *)sqlite3_column_text(stmt, 5));
+    u->username     = strdup(buf);
+
+    if (!u->home || !u->shell || !u->service || !u->username) {
+        user_free(u);
+        free(n);
+        return -1;
+    }
+
+    n->next = g_db_user_ptr;
+    g_db_user_ptr = n;
     return 0;
 }
 
-static int user_open_database_nolock(void)
+static int user_do_open_user_database(void)
+{
+    sqlite3_stmt *stmt;
+    sqlite3 *db;
+    int result;
+    int ret;
+
+    assert(!g_db_user_ptr);
+
+    user_do_close_user_database();
+    if (sqlite3_open_v2(GATEKEEPER_USER_DB_PATH, &db, SQLITE_OPEN_READONLY, NULL)) {
+        return -1;
+    }
+
+    if (sqlite3_prepare_v2(db, "SELECT `uid`, `idh`, `idl`, `home`, `shell`, "
+                               "`service` FROM `users` ORDER BY `uid` DESC",
+                           -1, &stmt, NULL)) {
+
+        sqlite3_close(db);
+        return -1;
+    }
+
+    result = -1;
+    for (;;) {
+        ret = sqlite3_step(stmt);
+        if (ret == SQLITE_DONE) {
+            result = 0;
+            break;
+
+        } else if (ret == SQLITE_ROW) {
+            if (user_do_open_user_database_one(stmt)) {
+                break;
+            }
+
+        } else {
+            break;
+        }
+    }
+
+    if (result) {
+        user_do_close_user_database();
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return result;
+}
+
+static int user_open_user_database_nolock(void)
 {
     if (!g_db_user_ref) {
-        if (user_do_open_database()) {
+        if (user_do_open_user_database()) {
             return -1;
         }
     }
@@ -230,7 +275,7 @@ static int user_open_database_nolock(void)
     return 0;
 }
 
-static int user_close_database_nolock(void)
+static int user_close_user_database_nolock(void)
 {
     if (!g_db_user_ref) {
         return 0;
@@ -241,7 +286,7 @@ static int user_close_database_nolock(void)
         return 0;
     }
 
-    return user_do_close_database();
+    return user_do_close_user_database();
 }
 
 static struct user_t *user_clone(const struct user_t *o)
@@ -272,7 +317,7 @@ static struct user_t *user_get_user_by_uid_nolock(uid_t uid)
     struct unode_t *n;
     struct user_t *r;
 
-    if (user_open_database_nolock()) {
+    if (user_open_user_database_nolock()) {
         return NULL;
     }
 
@@ -284,7 +329,7 @@ static struct user_t *user_get_user_by_uid_nolock(uid_t uid)
         }
     }
 
-    if (user_close_database_nolock()) {
+    if (user_close_user_database_nolock()) {
         user_free(r);
         return NULL;
     }
@@ -297,7 +342,7 @@ static struct user_t *user_get_user_by_id_nolock(uint64_t h, uint64_t l)
     struct unode_t *n;
     struct user_t *r;
 
-    if (user_open_database_nolock()) {
+    if (user_open_user_database_nolock()) {
         return NULL;
     }
 
@@ -309,7 +354,7 @@ static struct user_t *user_get_user_by_id_nolock(uint64_t h, uint64_t l)
         }
     }
 
-    if (user_close_database_nolock()) {
+    if (user_close_user_database_nolock()) {
         user_free(r);
         return NULL;
     }
@@ -338,7 +383,7 @@ static int user_open_userdb(struct unode_t **ptr, int *ref)
         return 0;
     }
 
-    if (user_open_database_nolock()) {
+    if (user_open_user_database_nolock()) {
         pthread_mutex_unlock(&g_mutex_user);
         return -1;
     }
@@ -357,7 +402,7 @@ static int user_close_userdb(struct unode_t **ptr, int *ref)
         return 0;
     }
 
-    if (user_close_database_nolock()) {
+    if (user_close_user_database_nolock()) {
         pthread_mutex_unlock(&g_mutex_user);
         return -1;
     }
