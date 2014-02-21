@@ -183,7 +183,7 @@ static int user_do_open_user_database_one(sqlite3_stmt *stmt)
     n = (struct unode_t *)malloc(sizeof(*n));
     u = (struct user_t *)malloc(sizeof(*u));
     if (!n || !u) {
-        user_free(u);
+        free(u);
         free(n);
         return -1;
     }

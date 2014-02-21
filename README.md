@@ -157,7 +157,7 @@ Well, this project is currently only a demo.
 In order to get the full power out of Gatekeeper, read the code and find all
 the TODOs. There're quite some now. This is the list of what is missing:
 
-1. The local service list, you see hardcoded app_81001 ~ app_81010 now.
+1. The local service list, you must manually operate the sqlite database now.
 2. The host keypair distributing system, a hardcoded keypair is used for
 anything now, meaning that all the hosts share the same public key, and the
 demo program holds the private key.
