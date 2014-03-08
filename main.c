@@ -50,7 +50,8 @@ int main(int argc, char *argv[])
         return EXIT_FAILURE;
     }
 
-    printf("%s@%s\n", loginname, host);
+    printf("Valid ticket for %s to the no.%d account on remote box:\n", host, id);
+    printf("%s\n", loginname);
     printf("%s\n", loginpass);
     return EXIT_SUCCESS;
 }

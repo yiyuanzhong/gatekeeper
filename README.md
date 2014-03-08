@@ -49,10 +49,15 @@ because the private key is never transmitted over the wire. MITM can be
 prevented with some efforts.
 
 ## How to run it?
-Gatekeeper requires libgmp, libpbc and OpenSSL to build.
+Gatekeeper requires libgmp, libpbc, OpenSSL and sqlite3 to build.
 * https://gmplib.org/
 * http://crypto.stanford.edu/pbc/
 * http://www.openssl.org/
+* http://www.sqlite.org/
+
+By default sqlite3 amalgamation is used, so place sqlite3.h and sqlite3.c
+into sqlite/ before you configure. Alternatively you can use --without-sqlite
+configure switch to use the system installed sqlite3.
 
 The build result is installed into /usr/local/lib/libgatekeeper.so.2
 
@@ -67,6 +72,12 @@ your Linux distro, it might be like:
 ```
 
 Check for existing PAM and NSS modules, just do what they do.
+
+You should generate the demonstrating user database now:
+```shell
+# sqlite3 /var/run/gatekeeper_user.db <sqlite/empty.sql
+# sqlite3 /var/run/gatekeeper_user.db <sqlite/demo.sql
+```
 
 Modify /etc/nsswitch.conf and append "gatekeeper" to 3 databases: passwd, group
 and shadow, like this:
@@ -86,16 +97,16 @@ If you're doing it right, now try to type "getent passwd":
 $ getent passwd
 root:x:0:0:root:/root:/bin/bash
 ...
-app_81001:x:81001:81000:GATEKEEPER:/home:/bin/sh
-app_81002:x:81002:81000:GATEKEEPER:/home:/bin/sh
-app_81003:x:81003:81000:GATEKEEPER:/home:/bin/sh
-app_81004:x:81004:81000:GATEKEEPER:/home:/bin/sh
-app_81005:x:81005:81000:GATEKEEPER:/home:/bin/sh
-app_81006:x:81006:81000:GATEKEEPER:/home:/bin/sh
-app_81007:x:81007:81000:GATEKEEPER:/home:/bin/sh
-app_81008:x:81008:81000:GATEKEEPER:/home:/bin/sh
-app_81009:x:81009:81000:GATEKEEPER:/home:/bin/sh
-app_81010:x:81010:81000:GATEKEEPER:/home:/bin/sh
+app_81001:x:81001:81000:Demo 81001:/home/services/81001:/bin/sh
+app_81002:x:81002:81000:Demo 81002:/home/services/81002:/bin/sh
+app_81010:x:81010:81000:Demo 81010:/home/services/81010:/bin/sh
+app_81016:x:81016:81000:Demo 81016:/home/services/81016:/bin/sh
+app_81019:x:81019:81000:Demo 81019:/home/services/81019:/bin/sh
+app_81022:x:81022:81000:Demo 81022:/home/services/81022:/bin/sh
+app_81037:x:81037:81000:Demo 81037:/home/services/81037:/bin/sh
+app_81086:x:81086:81000:Demo 81086:/home/services/81086:/bin/sh
+app_81113:x:81113:81000:Demo 81113:/home/services/81113:/bin/sh
+app_81151:x:81151:81000:Demo 81151:/home/services/81151:/bin/sh
 $
 ```
 
@@ -117,7 +128,8 @@ need a valid set of login credentials. A demonstrate program is built but not
 installed. The demo can generate valid username and password:
 ```shell
 $ ./test_gatekeeper 127.0.0.1 0
-g_aaak8u1jdi03zflnf9059tqibdsi@127.0.0.1
+Valid ticket for 127.0.0.1 to the no.0 account on remote box:
+g_aaak8u1jdi03zflnf9059tqibdsi
 X/n{UwXfZBARmVnpIRVE~Iu5zro|#@[=4lEXCOJEqd{n%Q0}_>oxJ^7.N/xege;)yvs-&R}w
 $
 ```
@@ -139,17 +151,27 @@ You should 1. successfully login into app_81001. 2. fail to change password.
 Another account?
 ```shell
 $ ./test_gatekeeper 127.0.0.1 3
-g_aaak8u1jdi03zflnf9059tqibdsl@127.0.0.1
+Valid ticket for 127.0.0.1 to the no.3 account on remote box:
+g_aaak8u1jdi03zflnf9059tqibdsl
 YUHS/.)g0=&YecJR6L~<lV,hQS^s0)2UMzscpgK^4m:H8.)14l_W?PyFEdsF9o05s2kzqJK[
 $ ssh g_aaak8u1jdi03zflnf9059tqibdsl@127.0.0.1
 g_aaak8u1jdi03zflnf9059tqibdsl@127.0.0.1's password:
 Last login: Mon Jan 20 01:22:22 2014 from ::1
 $ id
-uid=81004(app_81004) gid=81000(gatekeeper) groups=81000(gatekeeper)
+uid=81016(app_81016) gid=81000(gatekeeper) groups=81000(gatekeeper)
 $
 ```
 
 The username/password can be used unlimited times until 120 seconds later.
+
+Note that the source IP address is checked against the ticket, so provide
+correct IP address for __local IP__ is essential. SSH into 127.0.0.1 will
+make your local IP as 127.0.0.1, ::1 for ::1, and your external IP if you
+SSH into a remote box. For example, 192.168.1.1 to login into 192.168.3.7,
+the remote box will see your IP as 192.168.1.1, so you use:
+```shell
+$ ./test_gatekeeper 192.168.1.1 0
+```
 
 ## That's it?
 Well, this project is currently only a demo.
